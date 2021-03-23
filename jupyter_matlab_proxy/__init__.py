@@ -13,7 +13,7 @@ def _get_env(port, base_url):
 
 def setup_matlab():
     return {
-        "command": ["module", "load", "MATLAB", "&&", "matlab-jupyter-app"],
+        "command": ["matlab-jupyter-app"],
         "timeout": 100,
         "environment": _get_env,
         "absolute_url": True,
