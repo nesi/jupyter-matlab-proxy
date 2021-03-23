@@ -8,17 +8,12 @@ def _get_env(port, base_url):
         "APP_PORT": str(port),
         "BASE_URL": f"{base_url}matlab",
         "APP_HOST": "127.0.0.1",
-        "MLM_LICENSE_FILE":"/opt/nesi/share/MATLAB/Licenses/apps.lic",
-        "PATH":"/opt/nesi/share/MATLAB/R2020a/bin:/opt/nesi/share/MATLAB/R2020a/etc/glnxa64",
-        "_JAVA_OPTIONS":"-Xmx256m",
-        "TZ":"Pacific/Auckland",
-        "MATLAB_LOG_DIR":"/tmp"
     }
 
 
 def setup_matlab():
     return {
-        "command": ["matlab-jupyter-app"],
+        "command": ["module", "load", "MATLAB", "&&", "matlab-jupyter-app"],
         "timeout": 100,
         "environment": _get_env,
         "absolute_url": True,
