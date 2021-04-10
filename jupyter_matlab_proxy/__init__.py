@@ -5,7 +5,11 @@ import os
 
 def _get_env(port, base_url):
     
+<<<<<<< HEAD
     matlab_root = "/opt/nesi/share/MATLAB/"
+=======
+]    matlab_root = "/opt/nesi/share/MATLAB/"
+>>>>>>> cabc92f2dd6d29c78c70561d09b374a7674b80f7
     matlab_lic_root = os.path.join(matlab_root, "Licenses")
     matlab_lic_path=""
 
