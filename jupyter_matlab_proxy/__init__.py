@@ -1,10 +1,13 @@
-# Copyright 2021 The MathWorks, Inc.
+# Copyright 2020 The MathWorks, Inc.
 
 import os
 
+
 def _get_env(port, base_url):
     
+    matlab_ver = "2020a"
     matlab_root = "/opt/nesi/share/MATLAB/"
+    matlab_bin = os.path.join(matlab_root, matlab_ver, "bin")
     matlab_lic_root = os.path.join(matlab_root, "Licenses")
     matlab_lic_path=""
 
@@ -17,9 +20,13 @@ def _get_env(port, base_url):
         "APP_PORT": str(port),
         "BASE_URL": f"{base_url}matlab",
         "APP_HOST": "127.0.0.1",
+        "TZ":"Pacific/Auckland",
         "MLM_LICENSE_FILE": matlab_lic_path,
-        "MHLM_CONTEXT" : "MATLAB_JUPYTER"
+        # Is there a better way to path things in setuptools?
+        "PATH": os.getenv("PATH") + ":" + matlab_bin 
     }
+
+
 
 def setup_matlab():
     return {
