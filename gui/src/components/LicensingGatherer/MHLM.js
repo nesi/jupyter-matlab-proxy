@@ -1,10 +1,9 @@
 // Copyright 2020 The MathWorks, Inc.
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import {
-    selectLicensingMhlmUsername,
-    selectWsEnv
+    selectLicensingMhlmUsername
 } from '../../selectors';
 import {
     fetchSetLicensing
@@ -63,21 +62,15 @@ function initLogin(clientNonce, serverNonce, sourceId) {
   loginFrame.postMessage(JSON.stringify(initPayload), "*");
 }
 
+// TODO Receive from serverside
+// const mhlmLoginHostname = 'login-integ3';
+const mhlmLoginHostname = 'login';
+const getHostname = () => `https://${mhlmLoginHostname}.mathworks.com`;
+
 function MHLM() {
     const dispatch = useDispatch();
     const [iFrameLoaded, setIFrameLoaded] = useState(false);
     const username = useSelector(selectLicensingMhlmUsername);
-    const wsEnv = useSelector(selectWsEnv);
-    const mhlmLoginHostname = useMemo(
-        () => {
-            let subdomain = 'login';
-            if (wsEnv.includes('integ')) {
-                subdomain = `${subdomain}-${wsEnv}`;
-            }
-            return  `https://${subdomain}.mathworks.com`;
-        },
-        [wsEnv]
-    );
 
     // Create random sourceId string
     const sourceId = (
@@ -90,7 +83,7 @@ function MHLM() {
         const handler = event => {
 
             // Only process events that are related to the iframe setup
-            if (event.origin === mhlmLoginHostname) {
+            if (event.origin === getHostname()) {
                 const data = JSON.parse(event.data);
 
                 if (data.event === 'nonce') {
@@ -118,7 +111,7 @@ function MHLM() {
         return () => {
             window.removeEventListener("message", handler);
         };
-    }, [dispatch, sourceId, mhlmLoginHostname]);
+    }, [dispatch, sourceId]);
 
     useEffect(() => {
         if (iFrameLoaded === true) {
@@ -128,7 +121,7 @@ function MHLM() {
 
     const handleIFrameLoaded = () => setIFrameLoaded(true);
 
-    const embeddedLoginUrl = `${mhlmLoginHostname}/embedded-login/v2/login.html`;
+    const embeddedLoginUrl = `${getHostname()}/embedded-login/v2/login.html`;
 
     return (
         <div id="MHLM">

@@ -1,6 +1,7 @@
-# Copyright 2021 The MathWorks, Inc.
+# Copyright 2020 The MathWorks, Inc.
 
 import os
+
 
 def _get_env(port, base_url):
     
@@ -18,8 +19,8 @@ def _get_env(port, base_url):
         "BASE_URL": f"{base_url}matlab",
         "APP_HOST": "127.0.0.1",
         "MLM_LICENSE_FILE": matlab_lic_path,
-        "MHLM_CONTEXT" : "MATLAB_JUPYTER"
     }
+
 
 def setup_matlab():
     return {

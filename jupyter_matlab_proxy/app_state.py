@@ -10,7 +10,6 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import tempfile
 import socket
-import errno
 from collections import deque
 from .util import mw
 from .util.exceptions import (
@@ -291,7 +290,7 @@ class AppState:
             f.write(json.dumps(config))
 
     def reserve_matlab_port(self):
-        """ Reserve a free port for MATLAB Embedded Connector in the allowed range. """
+        """ Reserve a free port for MATLAB Embedded Connector. """
 
         # FIXME Because of https://github.com/http-party/node-http-proxy/issues/1342 the
         # node application in development mode always uses port 31515 to bypass the
@@ -299,23 +298,10 @@ class AppState:
         if os.getenv("DEV") == "true":
             self.matlab_port = 31515
         else:
-
-            # TODO If MATLAB Connector is enhanced to allow any port, then the
-            # following can be used to get an unused port instead of the for loop and
-            # try-except.
-            # s.bind(("", 0))
-            # self.matlab_port = s.getsockname()[1]
-
-            for port in mw.range_matlab_connector_ports():
-                try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.bind(("", port))
-                    self.matlab_port = port
-                    s.close()
-                    break
-                except socket.error as e:
-                    if e.errno != errno.EADDRINUSE:
-                        raise e
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind(("", 0))
+            self.matlab_port = s.getsockname()[1]
+            s.close()
 
     async def start_matlab(self, restart=False):
         """ Start MATLAB. """
@@ -395,8 +381,6 @@ class AppState:
             matlab_env["MW_LOGIN_DISPLAY_NAME"] = self.licensing["display_name"]
             matlab_env["MW_LOGIN_USER_ID"] = self.licensing["user_id"]
             matlab_env["MW_LOGIN_PROFILE_ID"] = self.licensing["profile_id"]
-            if os.getenv("MHLM_CONTEXT") is None:
-                matlab_env["MHLM_CONTEXT"] = "MATLAB_JAVASCRIPT_DESKTOP"
 
         elif self.licensing["type"] == "nlm":
             matlab_env["MLM_LICENSE_FILE"] = self.licensing["conn_str"]
