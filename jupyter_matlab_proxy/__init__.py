@@ -18,6 +18,7 @@ def _get_env(port, base_url):
         "APP_PORT": str(port),
         "BASE_URL": f"{base_url}matlab",
         "APP_HOST": "127.0.0.1",
+        "TZ":"Pacific/Auckland",
         "MLM_LICENSE_FILE": matlab_lic_path,
     }
 
