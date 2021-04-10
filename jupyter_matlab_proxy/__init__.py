@@ -5,7 +5,7 @@ import os
 
 def _get_env(port, base_url):
     
-    matlab_root = "/opt/nesi/share/MATLAB/"
+]    matlab_root = "/opt/nesi/share/MATLAB/"
     matlab_lic_root = os.path.join(matlab_root, "Licenses")
     matlab_lic_path=""
 
@@ -18,6 +18,7 @@ def _get_env(port, base_url):
         "APP_PORT": str(port),
         "BASE_URL": f"{base_url}matlab",
         "APP_HOST": "127.0.0.1",
+        "TZ":"Pacific/Auckland",
         "MLM_LICENSE_FILE": matlab_lic_path,
     }
 
