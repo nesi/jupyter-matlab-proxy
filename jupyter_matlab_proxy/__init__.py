@@ -4,16 +4,33 @@ import os
 
 
 def _get_env(port, base_url):
+    
+    matlab_ver = "2020a"
+    matlab_root = "/opt/nesi/share/MATLAB/"
+    matlab_bin = os.path.join(matlab_root, matlab_ver, "bin")
+    matlab_lic_root = os.path.join(matlab_root, "Licenses")
+    matlab_lic_path=""
+
+    for lic in os.listdir(matlab_lic_root):
+        matlab_lic_path = os.path.join(matlab_lic_root,lic)
+        if len(lic)>4 and lic[-4:]==".lic" and os.access(matlab_lic_path, os.R_OK):
+            break
+        
     return {
         "APP_PORT": str(port),
         "BASE_URL": f"{base_url}matlab",
         "APP_HOST": "127.0.0.1",
+        "TZ":"Pacific/Auckland",
+        "MLM_LICENSE_FILE": matlab_lic_path,
+        # Is there a better way to path things in setuptools?
+        "PATH": os.getenv("PATH") + ":" + matlab_bin 
     }
+
 
 
 def setup_matlab():
     return {
-        "command": ["/bin/bash", "-lc", "module load MATLAB nodejs && matlab-jupyter-app"],
+        "command": ["matlab-jupyter-app"],
         "timeout": 100,
         "environment": _get_env,
         "absolute_url": True,
