@@ -2,12 +2,9 @@
 
 import os
 
-
 def _get_env(port, base_url):
     
-    matlab_ver = "2020a"
     matlab_root = "/opt/nesi/share/MATLAB/"
-    matlab_bin = os.path.join(matlab_root, matlab_ver, "bin")
     matlab_lic_root = os.path.join(matlab_root, "Licenses")
     matlab_lic_path=""
 
@@ -23,8 +20,6 @@ def _get_env(port, base_url):
         "MLM_LICENSE_FILE": matlab_lic_path,
         "MHLM_CONTEXT" : "MATLAB_JUPYTER"
     }
-
-
 
 def setup_matlab():
     return {
