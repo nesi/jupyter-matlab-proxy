@@ -13,7 +13,7 @@ def _get_env(port, base_url):
 
 def setup_matlab():
     return {
-        "command": ["eval $($LMOD_CMD load MATLAB) &&", "matlab-jupyter-app"],
+        "command": ["/bin/bash", "-lc", "module load MATLAB nodejs && matlab-jupyter-app"],
         "timeout": 100,
         "environment": _get_env,
         "absolute_url": True,
