@@ -5,14 +5,14 @@ import os
 
 def _get_env(port, base_url):
     
-    matlab_root = "/opt/nesi/share/MATLAB/"
-    matlab_lic_root = os.path.join(matlab_root, "Licenses")
-    matlab_lic_path=""
+    # matlab_root = "/opt/nesi/share/MATLAB/"
+    # matlab_lic_root = os.path.join(matlab_root, "Licenses")
+    # matlab_lic_path=""
 
-    for lic in os.listdir(matlab_lic_root):
-        matlab_lic_path = os.path.join(matlab_lic_root,lic)
-        if len(lic)>4 and lic[-4:]==".lic" and os.access(matlab_lic_path, os.R_OK):
-            break
+    # for lic in os.listdir(matlab_lic_root):
+    #     matlab_lic_path = os.path.join(matlab_lic_root,lic)
+    #     if len(lic)>4 and lic[-4:]==".lic" and os.access(matlab_lic_path, os.R_OK):
+    #         break
         
     return {
         "APP_PORT": str(port),
@@ -23,7 +23,7 @@ def _get_env(port, base_url):
 
 def setup_matlab():
     return {
-        "command": [os.path.join(os.path.dirname(os.path.abspath(__file__)), "wrapper.sh")],
+        "command": [os.path.join(os.path.dirname(os.path.abspath(__file__)), "nesi_wrapper.sh")],
         "timeout": 100,
         "environment": _get_env,
         "absolute_url": True,

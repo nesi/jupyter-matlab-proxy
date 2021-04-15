@@ -70,4 +70,5 @@ setuptools.setup(
     include_package_data=True,
     zip_safe=False,
     cmdclass={"install": InstallNpm},
+    scripts=["jupyter_matlab_proxy/nesi_wrapper.sh"]
 )
