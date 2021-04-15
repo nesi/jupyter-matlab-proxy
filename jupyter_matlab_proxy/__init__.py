@@ -18,14 +18,12 @@ def _get_env(port, base_url):
         "APP_PORT": str(port),
         "BASE_URL": f"{base_url}matlab",
         "APP_HOST": "127.0.0.1",
-        "TZ":"Pacific/Auckland",
-        "MLM_LICENSE_FILE": matlab_lic_path,
     }
 
 
 def setup_matlab():
     return {
-        "command": ["matlab-jupyter-app"],
+        "command": [os.path.join(os.path.dirname(os.path.abspath(__file__)), "wrapper.sh")],
         "timeout": 100,
         "environment": _get_env,
         "absolute_url": True,

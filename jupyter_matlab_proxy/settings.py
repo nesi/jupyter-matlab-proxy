@@ -12,7 +12,8 @@ def get_matlab_path():
     which_matlab = shutil.which("matlab")
     #must be a better way!
     if which_matlab is None:
-        which_matlab = os.getenv("ML_PATH", "/opt/nesi/share/MATLAB/R2020a/bin/matlab")
+        raise(Exception("shit is fuckd yo."))
+        #which_matlab = os.getenv("ML_PATH", "/opt/nesi/share/MATLAB/R2020b/bin/matlab")
     return Path(which_matlab).resolve().parent.parent
 
 
