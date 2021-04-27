@@ -28,7 +28,7 @@ if os.environ.get("DEV", "false").lower() != "true":
     from .gui.static import js
     from .gui.static import media
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("MATLABProxyApp")
 
 # TODO It is bad practice to have global state in aiohttp applications, instead this
