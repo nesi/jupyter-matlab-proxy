@@ -12,7 +12,7 @@ def get_matlab_path():
     which_matlab = shutil.which("matlab")
     #must be a better way!
     if which_matlab is None:
-        raise(Exception("shit is fuckd yo."))
+        raise(Exception("'matlab' not on path. Was module loaded properly?"))
         #which_matlab = os.getenv("ML_PATH", "/opt/nesi/share/MATLAB/R2020b/bin/matlab")
     return Path(which_matlab).resolve().parent.parent
 
@@ -61,7 +61,7 @@ def get(dev=False):
             "host_interface": os.environ.get("APP_HOST", "127.0.0.1"),
             "mwapikey": str(uuid.uuid4()),
             "matlab_protocol": "http",
-            "matlab_display": ":1",
+            "matlab_display": ":100123",
             "nlm_conn_str": os.environ.get("MLM_LICENSE_FILE"),
             "matlab_config_file": Path(tempfile.gettempdir())
             / ".matlab"
@@ -85,7 +85,7 @@ def get(dev=False):
             ],
             "xvfb_cmd": [
                 "Xvfb",
-                ":1",
+                ":100123",
                 "-screen",
                 "0",
                 "1600x1200x24",
@@ -103,7 +103,7 @@ def get(dev=False):
             "host_interface": os.environ.get("APP_HOST"),
             "mwapikey": str(uuid.uuid4()),
             "matlab_protocol": "https",
-            "matlab_display": ":1",
+            "matlab_display": ":100123",
             "nlm_conn_str": os.environ.get("MLM_LICENSE_FILE"),
             "matlab_config_file": Path.home() / ".matlab" / "proxy_app_config.json",
             "mwa_api_endpoint": f"https://login{ws_env_suffix}.mathworks.com/authenticationws/service/v4",
