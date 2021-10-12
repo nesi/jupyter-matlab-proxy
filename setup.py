@@ -60,7 +60,7 @@ setuptools.setup(
     keywords=["Jupyter"],
     classifiers=["Framework :: Jupyter"],
     python_requires="~=3.6",
-    install_requires=["jupyter-server-proxy", "aiohttp~=3.6.2"],
+    install_requires=["jupyter-server-proxy", "aiohttp>=3.7.4"], 
     setup_requires=["pytest-runner"],
     tests_require=tests_require,
     extras_require={"dev": ["aiohttp-devtools", "black"] + tests_require},
