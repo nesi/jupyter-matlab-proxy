@@ -1,4 +1,4 @@
-// Copyright 2020 The MathWorks, Inc.
+// Copyright 2020-2021 The MathWorks, Inc.
 
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
@@ -73,10 +73,10 @@ function MHLM() {
     const username = useSelector(selectLicensingMhlmUsername);
 
     // Create random sourceId string
-    const sourceId = (
+    const sourceId = useState(
         Math.random().toString(36).substring(2, 15)
         + Math.random().toString(36).substring(2, 15)
-    );
+    )[0];
 
     useEffect(() => {
 

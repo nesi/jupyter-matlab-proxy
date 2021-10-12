@@ -1,35 +1,27 @@
-# Copyright 2020 The MathWorks, Inc.
+# Copyright 2020-2021 The MathWorks, Inc.
 
 import os
 import sys
 from aiohttp import web
 import aiohttp
 import asyncio
-import logging
 import json
+import signal
 from . import settings
 from .app_state import AppState
-from .util.exceptions import LicensingError
+from .util import mwi_logger
+from .util.mwi_exceptions import LicensingError
+from jupyter_matlab_proxy import mwi_environment_variables as mwi_env
+import pkgutil
+import mimetypes
 
-if os.environ.get("DEV", "false").lower() != "true":
-    import mimetypes
+mimetypes.add_type("font/woff", ".woff")
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("font/eot", ".eot")
+mimetypes.add_type("font/ttf", ".ttf")
+mimetypes.add_type("application/json", ".map")
+mimetypes.add_type("image/png", ".ico")
 
-    mimetypes.add_type("font/woff", ".woff")
-    mimetypes.add_type("font/woff2", ".woff2")
-    mimetypes.add_type("font/eot", ".eot")
-    mimetypes.add_type("font/ttf", ".ttf")
-    mimetypes.add_type("application/json", ".map")
-    mimetypes.add_type("image/png", ".ico")
-    import pkgutil
-    from pkg_resources import resource_listdir, resource_isdir
-    from . import gui
-    from .gui import static
-    from .gui.static import css
-    from .gui.static import js
-    from .gui.static import media
-
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger("MATLABProxyApp")
 
 # TODO It is bad practice to have global state in aiohttp applications, instead this
 # mount point should be read in the application start up function, then if it is not
@@ -90,7 +82,7 @@ async def start_matlab(req):
     state = req.app["state"]
 
     # Start MATLAB
-    await state.start_matlab(restart=True)
+    await state.start_matlab(restart_matlab=True)
 
     return create_status_response(req.app)
 
@@ -126,7 +118,7 @@ async def set_licensing_info(req):
     if state.is_licensed() is True and not isinstance(state.error, LicensingError):
 
         # Start MATLAB
-        await state.start_matlab(restart=True)
+        await state.start_matlab(restart_matlab=True)
 
     return create_status_response(req.app)
 
@@ -157,7 +149,13 @@ async def termination_integration_delete(req):
     # End termination with 0 exit code to indicate intentional termination
     await req.app.shutdown()
     await req.app.cleanup()
-    sys.exit(0)
+
+    """When testing with pytest, its not possible to catch sys.exit(0) using the construct 
+    'with pytest.raises()', there by causing the test : test_termination_integration_delete() 
+    to fail. Inorder to avoid this, adding the below if condition to check to skip sys.exit(0) when testing
+    """
+    if not mwi_env.is_testing_mode_enabled():
+        sys.exit(0)
 
 
 async def root_redirect(request):
@@ -174,6 +172,12 @@ async def static_get(req):
 
 
 def make_static_route_table(app):
+    from pkg_resources import resource_listdir, resource_isdir
+    from . import gui
+    from .gui import static
+    from .gui.static import css
+    from .gui.static import js
+    from .gui.static import media
 
     base_url = app["settings"]["base_url"]
 
@@ -197,6 +201,7 @@ def make_static_route_table(app):
                         content_type = mimetypes.guess_type(name)[0]
 
                     headers = {"content-type": content_type}
+                    headers.update(app["settings"]["mwi_custom_http_headers"])
 
                     table[f"{base_url}{parent}/{name}"] = {
                         "mod": mod,
@@ -277,15 +282,18 @@ async def matlab_view(req):
                     allow_redirects=False,
                     data=req_body,
                 ) as res:
+
                     headers = res.headers.copy()
                     body = await res.read()
+                    headers.update(req.app["settings"]["mwi_custom_http_headers"])
+
                     return web.Response(headers=headers, status=res.status, body=body)
             except Exception:
                 raise web.HTTPNotFound()
 
 
 async def transform_body(req):
-    """ Transform some requests as required by the MATLAB JavaScript Desktop. """
+    """Transform some requests as required by the MATLAB JavaScript Desktop."""
 
     body = await req.read()
 
@@ -318,7 +326,7 @@ async def license_init(app):
 
 
 async def matlab_starter(app):
-    """ Upon app startup, start MATLAB if able to do so. """
+    """Upon app startup, start MATLAB if able to do so."""
 
     state = app["state"]
 
@@ -331,19 +339,23 @@ async def matlab_starter(app):
 
 
 async def start_background_tasks(app):
-    loop = asyncio.get_running_loop()
-    app["license_init"] = loop.create_task(license_init(app))
-    app["matlab_starter"] = loop.create_task(matlab_starter(app))
+    await license_init(app)
+    await matlab_starter(app)
 
 
 async def cleanup_background_tasks(app):
-
+    logger = mwi_logger.get()
     state = app["state"]
+    tasks = state.tasks
+    for task_name, task in tasks.items():
+        if not task.cancelled():
+            logger.debug(f"Cancelling MWI task: {task_name} : {task} ")
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
-    app["license_init"].cancel()
-    app["matlab_starter"].cancel()
-    await app["license_init"]
-    await app["matlab_starter"]
     await state.stop_matlab()
 
 
@@ -352,9 +364,7 @@ def create_app():
     app = web.Application()
 
     # Get application settings
-    app["settings"] = settings.get(
-        dev=(os.environ.get("DEV", "false").lower() == "true")
-    )
+    app["settings"] = settings.get(dev=(mwi_env.is_development_mode_enabled()))
 
     # TODO Validate any settings
 
@@ -363,7 +373,7 @@ def create_app():
 
     # In development mode, the node development server proxies requests to this
     # development server instead of serving the static files directly
-    if os.environ.get("DEV", "false").lower() != "true":
+    if not mwi_env.is_development_mode_enabled():
         app["static_route_table"] = make_static_route_table(app)
         for key in app["static_route_table"].keys():
             app.router.add_route("GET", key, static_get)
@@ -388,14 +398,62 @@ def create_app():
     return app
 
 
+def get_supported_termination_signals():
+    return [signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM]
+
+
 def main():
-    logger.info("Starting MATLAB proxy-app")
+
+    logger = mwi_logger.get(init=True)
+
     app = create_app()
+
+    logger.info("Starting MATLAB proxy-app")
+    logger.info(
+        f" with base_url: {os.environ[mwi_env.get_env_name_base_url()]} and "
+        f"app_port:{os.environ[mwi_env.get_env_name_app_port()]}."
+    )
+    if os.environ.get(mwi_env.get_env_name_mhlm_context()) is None:
+        logger.info(
+            f"\n The webdesktop can be accessed on http://localhost:{os.environ[mwi_env.get_env_name_app_port()]}{os.environ[mwi_env.get_env_name_base_url()]}/index.html"
+        )
+
     loop = asyncio.get_event_loop()
-    runner = web.AppRunner(app)
+
+    # Override default loggers
+    web_logger = None if not mwi_env.is_web_logging_enabled() else logger
+    runner = web.AppRunner(app, logger=web_logger, access_log=web_logger)
+
     loop.run_until_complete(runner.setup())
     site = web.TCPSite(
         runner, host=app["settings"]["host_interface"], port=app["settings"]["app_port"]
     )
     loop.run_until_complete(site.start())
+
+    # Register handlers to trap termination signals
+    for signal in get_supported_termination_signals():
+        logger.info(f"Installing handler for signal: {signal} ")
+        loop.add_signal_handler(signal, lambda: loop.stop())
+
     loop.run_forever()
+
+    async def shutdown():
+        logger.info("Shutting down MATLAB proxy-app")
+        for task in asyncio.Task.all_tasks():
+            logger.debug(f"calling cancel on all_tasks: {task}")
+            task.cancel()
+        await app.shutdown()
+        await app.cleanup()
+
+        asyncio.ensure_future(exit())
+
+    try:
+        loop.run_until_complete(shutdown())
+    except:
+        pass
+
+    logger.info(
+        "Finished shutting down. Thank you for using the MATLAB web desktop proxy."
+    )
+    loop.close()
+    sys.exit(0)

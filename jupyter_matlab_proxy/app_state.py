@@ -1,18 +1,19 @@
-# Copyright 2020 The MathWorks, Inc.
+# Copyright 2020-2021 The MathWorks, Inc.
 
 import asyncio
-import xml.etree.ElementTree as ET
+from jupyter_matlab_proxy import mwi_environment_variables as mwi_env
+from jupyter_matlab_proxy import mwi_embedded_connector as mwi_connector
+from jupyter_matlab_proxy import util
 import os
 import json
 import pty
+import sys
 import logging
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
-import tempfile
 import socket
 from collections import deque
-from .util import mw
-from .util.exceptions import (
+from .util import mw, mwi_logger
+from .util.mwi_exceptions import (
     LicensingError,
     InternalError,
     OnlineLicensingError,
@@ -22,7 +23,7 @@ from .util.exceptions import (
 )
 
 
-logger = logging.getLogger("MATLABProxyApp")
+logger = mwi_logger.get()
 
 
 class AppState:
@@ -30,7 +31,9 @@ class AppState:
         self.settings = settings
         self.processes = {"matlab": None, "xvfb": None}
         self.matlab_port = None
+        self.matlab_ready_file = None
         self.licensing = None
+        self.tasks = {}
         self.logs = {
             "matlab": deque(maxlen=200),
         }
@@ -38,27 +41,71 @@ class AppState:
 
         # Start in an error state if MATLAB is not present
         if not self.is_matlab_present():
-            self.error = MatlabInstallError(
-                "'matlab' executable not found in PATH"
-            )
+            self.error = MatlabInstallError("'matlab' executable not found in PATH")
             logger.error("'matlab' executable not found in PATH")
             return
 
+    def __get_cached_licensing_file(self):
+        """Get the cached licensing file
+
+        Returns:
+            Path : Path object to cached licensing file
+        """
+        return self.settings["matlab_config_file"]
+
+    def __delete_cached_licensing_file(self):
+        try:
+            logger.info(f"Deleting any cached licensing files!")
+            os.remove(self.__get_cached_licensing_file())
+        except FileNotFoundError:
+            # The file being absent is acceptable.
+            pass
+
+    def __reset_and_delete_cached_licensing(self):
+        logger.info(f"Resetting cached licensing information...")
+        self.licensing = None
+        self.__delete_cached_licensing_file()
+
+    async def __update_and_persist_licensing(self):
+        successful_update = await self.update_entitlements()
+        if successful_update:
+            self.persist_licensing()
+        else:
+            self.__reset_and_delete_cached_licensing()
+        return successful_update
+
     async def init_licensing(self):
-        """ Initialise licensing from persisted details or environment variable. """
+        """Initialize licensing from environment variable or cached file.
 
-        # Persisted licensing details present
-        if self.settings["matlab_config_file"].exists():
-            with open(self.settings["matlab_config_file"], "r") as f:
-                config = json.loads(f.read())
+        Greater precedence is given to value specified in environment variable MLM_LICENSE_FILE
+            If specified, this function will delete previously cached licensing information.
+            This enforces a clear understanding of what was used to initialize licensing.
+            The contents of the environment variable are NEVER cached.
+        """
 
-            if "licensing" in config:
-                # TODO Refactoring of config file reading/writing
-                licensing = config["licensing"]
+        # Default value
+        self.licensing = None
 
-                # If there is any problem loading config, remove it and persist
+        # NLM Connection String set in environment
+        if self.settings["nlm_conn_str"] is not None:
+            nlm_licensing_str = self.settings["nlm_conn_str"]
+            logger.info(f"Found NLM:[{nlm_licensing_str}] set in environment")
+            logger.info(f"Using NLM string to connect ... ")
+            self.licensing = {
+                "type": "nlm",
+                "conn_str": nlm_licensing_str,
+            }
+            self.__delete_cached_licensing_file()
+
+        # If NLM connection string is not present, then look for persistent LNU info
+        elif self.__get_cached_licensing_file().exists():
+            with open(self.__get_cached_licensing_file(), "r") as f:
+                logger.info("Found cached licensing information...")
                 try:
+                    # Load can throw if the file is empty for some reason.
+                    licensing = json.loads(f.read())
                     if licensing["type"] == "nlm":
+                        # Note: Only NLM settings entered in browser were cached.
                         self.licensing = {
                             "type": "nlm",
                             "conn_str": licensing["conn_str"],
@@ -84,29 +131,21 @@ class AppState:
                         ) - timedelta(hours=1)
 
                         if expiry_window > datetime.now(timezone.utc):
-                            await self.update_entitlements()
+                            successful_update = (
+                                await self.__update_and_persist_licensing()
+                            )
+                            if successful_update:
+                                logger.info("Successful re-use of cached information.")
                         else:
-                            # Reset licensing and persist
-                            self.licensing["identity_token"] = None
-                            self.licensing["source_id"] = None
-                            self.licensing["expiry"] = None
-                            self.licensing["entitlements"] = []
-                            self.persist_licensing()
+                            self.__reset_and_delete_cached_licensing()
+                    else:
+                        # Somethings wrong, licensing is neither NLM or MHLM
+                        self.__reset_and_delete_cached_licensing()
                 except Exception as e:
-                    logger.error("Error parsing config, resetting.")
-                    self.licensing = None
-                    self.persist_licensing()
-
-        # NLM Connection String set in environment
-        # TODO Validate connection string
-        elif self.settings["nlm_conn_str"] is not None:
-            self.licensing = {
-                "type": "nlm",
-                "conn_str": self.settings["nlm_conn_str"],
-            }
+                    self.__reset_and_delete_cached_licensing()
 
     def get_matlab_state(self):
-        """ Determine the state of MATLAB to be down/starting/up. """
+        """Determine the state of MATLAB to be down/starting/up."""
 
         matlab = self.processes["matlab"]
         xvfb = self.processes["xvfb"]
@@ -124,13 +163,13 @@ class AppState:
         elif xvfb.returncode is not None:
             return "down"
         # MATLAB processes started and MATLAB Embedded Connector ready file present
-        elif self.settings["matlab_ready_file"].exists():
+        elif self.matlab_ready_file.exists():
             return "up"
         # MATLAB processes started, but MATLAB Embedded Connector not ready
         return "starting"
 
     async def set_licensing_nlm(self, conn_str):
-        """ Set the licensing type to NLM and the connection string. """
+        """Set the licensing type to NLM and the connection string."""
 
         # TODO Validate connection string
         self.licensing = {"type": "nlm", "conn_str": conn_str}
@@ -144,7 +183,7 @@ class AppState:
         entitlements=[],
         entitlement_id=None,
     ):
-        """ Set the licensing type to MHLM and the details. """
+        """Set the licensing type to MHLM and the details."""
 
         try:
 
@@ -167,8 +206,9 @@ class AppState:
                 "entitlement_id": entitlement_id,
             }
 
-            await self.update_entitlements()
-            self.persist_licensing()
+            successful_update = await self.__update_and_persist_licensing()
+            if successful_update:
+                logger.info("Login successful, persisting login information.")
 
         except OnlineLicensingError as e:
             self.error = e
@@ -179,7 +219,7 @@ class AppState:
             log_error(logger, e)
 
     def unset_licensing(self):
-        """ Unset the licensing. """
+        """Unset the licensing."""
 
         self.licensing = None
 
@@ -188,7 +228,7 @@ class AppState:
             self.error = None
 
     def is_licensed(self):
-        """ Is MATLAB licensing configured? """
+        """Is MATLAB licensing configured?"""
 
         if self.licensing is not None:
             if self.licensing["type"] == "nlm":
@@ -205,11 +245,17 @@ class AppState:
         return False
 
     def is_matlab_present(self):
-        """ Is MATLAB install accessible? """
+        """Is MATLAB install accessible?"""
 
         return self.settings["matlab_path"] is not None
 
     async def update_entitlements(self):
+        """Speaks to MW and updates MHLM entitlements
+
+        Returns: True if update was successful
+        Raises:
+            InternalError: OnlineLicensingError, EntitlementError
+        """
         if self.licensing is None or self.licensing["type"] != "mhlm":
             raise InternalError(
                 "MHLM licensing must be configured to update entitlements!"
@@ -232,7 +278,7 @@ class AppState:
         except OnlineLicensingError as e:
             self.error = e
             log_error(logger, e)
-            return
+            return False
         except EntitlementError as e:
             self.error = e
             log_error(logger, e)
@@ -246,7 +292,7 @@ class AppState:
             self.licensing["profile_id"] = None
             self.licensing["entitlements"] = []
             self.licensing["entitlement_id"] = None
-            return
+            return False
 
         self.licensing["entitlements"] = entitlements
 
@@ -254,60 +300,55 @@ class AppState:
         # TODO Also, for now, set the first entitlement as active if there are multiple
         self.licensing["entitlement_id"] = entitlements[0]["id"]
 
+        # Successful update
+        return True
+
     def persist_licensing(self):
-        config_file = self.settings["matlab_config_file"]
-        if config_file.exists():
-            with open(config_file, "r") as f:
-                config = json.loads(f.read())
-        else:
-            config = {}
-
+        """Saves licensing information to file"""
         if self.licensing is None:
-            if "licensing" in config:
-                del config["licensing"]
-        elif self.licensing["type"] == "mhlm":
-            config["licensing"] = {
-                "type": "mhlm",
-                "identity_token": self.licensing["identity_token"],
-                "source_id": self.licensing["source_id"],
-                "expiry": self.licensing["expiry"],
-                "email_addr": self.licensing["email_addr"],
-                "first_name": self.licensing["first_name"],
-                "last_name": self.licensing["last_name"],
-                "display_name": self.licensing["display_name"],
-                "user_id": self.licensing["user_id"],
-                "profile_id": self.licensing["profile_id"],
-                "entitlement_id": self.licensing["entitlement_id"],
-            }
-        elif self.licensing["type"] == "nlm":
-            config["licensing"] = {
-                "type": "nlm",
-                "conn_str": self.licensing["conn_str"],
-            }
+            self.__delete_cached_licensing_file()
 
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_file, "w") as f:
-            f.write(json.dumps(config))
+        elif self.licensing["type"] in ["mhlm", "nlm"]:
+            logger.info("Saving licensing information...")
+            cached_licensing_file = self.__get_cached_licensing_file()
+            cached_licensing_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(cached_licensing_file, "w") as f:
+                f.write(json.dumps(self.licensing))
 
-    def reserve_matlab_port(self):
-        """ Reserve a free port for MATLAB Embedded Connector. """
-
+    def get_free_matlab_port(self):
+        """Returns a free port for MATLAB Embedded Connector in the allowed range."""
+        # NOTE It is not guranteed that the port will remain free!
         # FIXME Because of https://github.com/http-party/node-http-proxy/issues/1342 the
         # node application in development mode always uses port 31515 to bypass the
         # reverse proxy. Once this is addressed, remove this special case.
-        if os.getenv("DEV") == "true":
-            self.matlab_port = 31515
+        if (
+            mwi_env.is_development_mode_enabled()
+            and not mwi_env.is_testing_mode_enabled()
+        ):
+            return 31515
         else:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.bind(("", 0))
-            self.matlab_port = s.getsockname()[1]
-            s.close()
 
-    async def start_matlab(self, restart=False):
-        """ Start MATLAB. """
+            # TODO If MATLAB Connector is enhanced to allow any port, then the
+            # following can be used to get an unused port instead of the for loop and
+            # try-except.
+            # s.bind(("", 0))
+            # self.matlab_port = s.getsockname()[1]
+            for port in mw.range_matlab_connector_ports():
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.bind(("", port))
+                    s.close()
+                    break
+                except socket.error as e:
+                    if e.errno != errno.EADDRINUSE:
+                        raise e
+        return port
+
+    async def start_matlab(self, restart_matlab=False):
+        """Start MATLAB."""
 
         # FIXME
-        if self.get_matlab_state() != "down" and restart is False:
+        if self.get_matlab_state() != "down" and restart_matlab is False:
             raise Exception("MATLAB already running/starting!")
 
         # FIXME
@@ -336,41 +377,29 @@ class AppState:
         self.logs["matlab"].clear()
 
         # Reserve a port for MATLAB Embedded Connector
-        self.reserve_matlab_port()
+        self.matlab_port = self.get_free_matlab_port()
 
-        # The presence of matlab_ready_file indicates if MATLAB Embedded Connector is
-        # ready to receive connections, but this could be leftover from a terminated
-        # MATLAB, so ensure it is cleaned up before starting MATLAB
-        try:
-            self.settings["matlab_ready_file"].unlink()
-        except FileNotFoundError:
-            pass
-
-        # The presence of xvfb_ready_file indicates if Xvfb is ready to receive
-        # connections, but this could be leftover from a terminated Xvfb, so ensure it
-        # is cleaned up before starting Xvfb
-        display_num = self.settings["matlab_display"].replace(":", "")
-        xvfb_ready_file = Path(tempfile.gettempdir()) / ".X11-unix" / f"X{display_num}"
-        try:
-            xvfb_ready_file.unlink()
-        except FileNotFoundError:
-            pass
+        # Create a folder to hold the matlab_ready_file that will be created by MATLAB to signal readiness
+        self.matlab_ready_file, matlab_log_dir = mwi_connector.get_matlab_ready_file(
+            self.matlab_port
+        )
+        logger.info(f"MATLAB_LOG_DIR:{str(matlab_log_dir)}")
+        logger.info(f"MATLAB_READY_FILE:{str(self.matlab_ready_file)}")
 
         # Configure the environment MATLAB needs to start
         matlab_env = os.environ.copy()
         matlab_env["MW_CRASH_MODE"] = "native"
-        matlab_env["MATLAB_WORKER_CONFIG_ENABLE_LOCAL_PARCLUSTER"] = "true";
-        matlab_env["PCT_ENABLED"] = "true";
-        matlab_env["DISPLAY"] = self.settings["matlab_display"]
+        matlab_env["MATLAB_WORKER_CONFIG_ENABLE_LOCAL_PARCLUSTER"] = "true"
+        matlab_env["PCT_ENABLED"] = "true"
         matlab_env["HTTP_MATLAB_CLIENT_GATEWAY_PUBLIC_PORT"] = "1"
         matlab_env["MW_CONNECTOR_SECURE_PORT"] = str(self.matlab_port)
         matlab_env["MW_DOCROOT"] = str(
             self.settings["matlab_path"] / "ui" / "webgui" / "src"
         )
         matlab_env["MWAPIKEY"] = self.settings["mwapikey"]
-        # TODO Make this configurable (impacts the matlab ready file)
-        matlab_env["MATLAB_LOG_DIR"] = "/tmp"
-
+        # The matlab ready file is written into this location by MATLAB
+        matlab_env["MATLAB_LOG_DIR"] = str(matlab_log_dir)
+        matlab_env["MW_CD_ANYWHERE_ENABLED"] = "true"
         if self.licensing["type"] == "mhlm":
             matlab_env["MLM_WEB_LICENSE"] = "true"
             matlab_env["MLM_WEB_USER_CRED"] = access_token_data["token"]
@@ -381,6 +410,8 @@ class AppState:
             matlab_env["MW_LOGIN_DISPLAY_NAME"] = self.licensing["display_name"]
             matlab_env["MW_LOGIN_USER_ID"] = self.licensing["user_id"]
             matlab_env["MW_LOGIN_PROFILE_ID"] = self.licensing["profile_id"]
+            if os.getenv(mwi_env.get_env_name_mhlm_context()) is None:
+                matlab_env["MHLM_CONTEXT"] = "MATLAB_JAVASCRIPT_DESKTOP"
 
         elif self.licensing["type"] == "nlm":
             matlab_env["MLM_LICENSE_FILE"] = self.licensing["conn_str"]
@@ -396,18 +427,21 @@ class AppState:
         # matlab_env["CONNECTOR_CONFIGURABLE_WARMUP_TASKS"] = "warmup_hgweb"
         # matlab_env["CONNECTOR_WARMUP"] = "true"
 
-        logger.debug(f"Starting Xvfb on display {self.settings['matlab_display']}")
-        xvfb = await asyncio.create_subprocess_exec(
-            *self.settings["xvfb_cmd"], env=matlab_env
-        )
+        # Start Xvfb process
+        create_xvfb_cmd = self.settings["create_xvfb_cmd"]
+        xvfb_cmd, dpipe = create_xvfb_cmd()
+
+        xvfb, display_port = await mw.create_xvfb_process(xvfb_cmd, dpipe, matlab_env)
+
+        # Update settings and matlab_env dict
+        self.settings["matlab_display"] = ":" + str(display_port)
         self.processes["xvfb"] = xvfb
-        logger.debug(f"Started Xvfb (PID={xvfb.pid})")
 
-        # Wait for Xvfb to be ready
-        while not xvfb_ready_file.exists():
-            logger.debug(f"Waiting for XVFB")
-            await asyncio.sleep(0.1)
+        matlab_env["DISPLAY"] = self.settings["matlab_display"]
 
+        logger.debug(f"Started Xvfb with PID={xvfb.pid} on DISPLAY={display_port}")
+
+        # Start MATLAB Process
         logger.info(f"Starting MATLAB on port {self.matlab_port}")
         master, slave = pty.openpty()
         matlab = await asyncio.create_subprocess_exec(
@@ -419,7 +453,7 @@ class AppState:
         self.processes["matlab"] = matlab
         logger.debug(f"Started MATLAB (PID={matlab.pid})")
 
-        async def reader():
+        async def matlab_stderr_reader():
             while not self.processes["matlab"].stderr.at_eof():
                 line = await self.processes["matlab"].stderr.readline()
                 if line is None:
@@ -427,11 +461,16 @@ class AppState:
                 self.logs["matlab"].append(line)
             await self.handle_matlab_output()
 
-        loop = asyncio.get_running_loop()
-        loop.create_task(reader())
+        loop = (
+            asyncio.get_running_loop()
+            if util.is_python_version_newer_than_3_6()
+            else asyncio.get_event_loop()
+        )
+
+        self.tasks["matlab_stderr_reader"] = loop.create_task(matlab_stderr_reader())
 
     async def stop_matlab(self):
-        """ Terminate MATLAB. """
+        """Terminate MATLAB."""
 
         matlab = self.processes["matlab"]
         xvfb = self.processes["xvfb"]
@@ -448,6 +487,17 @@ class AppState:
             xvfb.terminate()
             waiters.append(xvfb.wait())
 
+        # Clean up matlab_ready_file
+        try:
+            if self.matlab_ready_file is not None:
+                logger.info(
+                    f"Cleaning up matlab_ready_file...{str(self.matlab_ready_file)}"
+                )
+                self.matlab_ready_file.unlink()
+        except FileNotFoundError:
+            # Some other process deleted this file
+            pass
+
         # Wait for termination
         for waiter in waiters:
             await waiter
@@ -460,9 +510,11 @@ class AppState:
         matlab = self.processes["matlab"]
 
         # Wait for MATLAB process to exit
+        logger.info("Waiting for MATLAB to exit...")
         await matlab.wait()
 
         rc = self.processes["matlab"].returncode
+        logger.info(f"MATLAB has exited with errorcode: {rc}")
 
         # Look for errors if MATLAB was not intentionally stopped and had an error code
         if len(self.logs["matlab"]) > 0 and self.processes["matlab"].returncode != 0:

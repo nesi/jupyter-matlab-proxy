@@ -1,9 +1,5 @@
-# Copyright 2020 The MathWorks, Inc.
-
-import json
+# Copyright 2020-2021 The MathWorks, Inc.
 import os
-from setuptools.command.build_py import build_py
-from setuptools.command.sdist import sdist
 from setuptools.command.install import install
 import setuptools
 from pathlib import Path
@@ -42,15 +38,24 @@ tests_require = [
     "pytest-env",
     "pytest-cov",
     "pytest-mock",
-    "pytest-dependency",
+    "pytest-aiohttp",
+    "requests",
+    "psutil",
 ]
+
+HERE = Path(__file__).parent.resolve()
+long_description = (HERE / "README.md").read_text()
 
 setuptools.setup(
     name="jupyter-matlab-proxy",
-    version="0.1.0",
+    version="0.3.4",
     url="https://github.com/mathworks/jupyter-matlab-proxy",
     author="The MathWorks, Inc.",
-    description="Jupyter extension to proxy MATLAB JavaScript Desktop",
+    author_email="jupyter-support@mathworks.com",
+    license="MATHWORKS CLOUD REFERENCE ARCHITECTURE LICENSE",
+    description="Jupyter Server Proxy for MATLAB",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     packages=setuptools.find_packages(exclude=["devel", "tests"]),
     keywords=["Jupyter"],
     classifiers=["Framework :: Jupyter"],
@@ -58,14 +63,10 @@ setuptools.setup(
     install_requires=["jupyter-server-proxy", "aiohttp~=3.6.2"],
     setup_requires=["pytest-runner"],
     tests_require=tests_require,
-    extras_require={"dev": ["aiohttp-devtools"] + tests_require},
+    extras_require={"dev": ["aiohttp-devtools", "black"] + tests_require},
     entry_points={
-        "jupyter_serverproxy_servers": [
-            "matlab = jupyter_matlab_proxy:setup_matlab"
-        ],
-        "console_scripts": [
-            "matlab-jupyter-app = jupyter_matlab_proxy.app:main"
-        ],
+        "jupyter_serverproxy_servers": ["matlab = jupyter_matlab_proxy:setup_matlab"],
+        "console_scripts": ["matlab-jupyter-app = jupyter_matlab_proxy.app:main"],
     },
     include_package_data=True,
     zip_safe=False,

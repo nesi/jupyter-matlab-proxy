@@ -1,12 +1,11 @@
-# Copyright 2020 The MathWorks, Inc.
+# Copyright 2020-2021 The MathWorks, Inc.
 
 # Development specific functions
 import asyncio
 from aiohttp import web
-import socket
-import time
-import os
-import sys
+import socket, time, os, sys
+from jupyter_matlab_proxy import mwi_environment_variables as mwi_env
+from jupyter_matlab_proxy import mwi_embedded_connector as mwi_connector
 
 desktop_html = b"""
 <h1>Fake MATLAB Web Desktop</h1>
@@ -24,7 +23,7 @@ desktop_html = b"""
 
 
 def wait_for_port(port):
-    """ Waits for the given port to become available """
+    """Waits for the given port to become available"""
 
     while True:
         print(f"Waiting for port {port} to be available")
@@ -39,19 +38,31 @@ def wait_for_port(port):
         break
 
 
-def xvfb(args):
-    "Writes ready file after 1 second then sleeps forever in a loose loop"
-    time.sleep(1)
-    print(f"Creating {str(args.ready_file)}")
-    args.ready_file.parent.mkdir(parents=True, exist_ok=True)
-    args.ready_file.touch()
-
-    while True:
-        time.sleep(60)
-
-
 async def web_handler(request):
     return web.Response(content_type="text/html", body=desktop_html)
+
+
+async def get_request_handler(request):
+    return web.Response(text=await request.text())
+
+
+async def post_request_handler(request):
+    return web.Response(text=await request.text())
+
+
+async def put_request_handler(request):
+    return web.Response(text=await request.text())
+
+
+async def delete_request_handler(request):
+    return web.Response(text=await request.text())
+
+
+async def web_socket_handler(request):
+    print("reaching websocket handler")
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    await ws.send_str("Hello world")
 
 
 async def fake_matlab_started(app):
@@ -60,7 +71,7 @@ async def fake_matlab_started(app):
 
     # If "123@brokenhost" is specified as the MLM_LICENSE_FILE, exit to simulate an
     # error
-    nlm = os.environ.get("MLM_LICENSE_FILE")
+    nlm = os.environ.get(mwi_env.get_env_name_network_license_manager())
     if nlm == "123@brokenhost":
         # TODO This should output the exact same text as MATLAB would in the same error
         # state
@@ -69,23 +80,30 @@ async def fake_matlab_started(app):
         print("Diagnostic Information", file=sys.stderr)
         sys.exit(1)
 
-    ready_file = app["ready_file"]
+    # Real MATLAB always uses  $MATLAB_LOG_DIR/connection.securePort as the ready file
+    # We mock reading from the environment variable by calling the helper functions
+    matlab_ready_file, matlab_log_dir = mwi_connector.get_matlab_ready_file(app["port"])
+
     ready_delay = app["ready_delay"]
     try:
         await asyncio.sleep(ready_delay)
-        print(f"Creating fake MATLAB Embedded Connector ready file at {ready_file}")
-        ready_file.touch()
+        print(
+            f"Creating fake MATLAB Embedded Connector ready file at {matlab_ready_file}"
+        )
+        matlab_ready_file.touch()
     except asyncio.CancelledError:
         pass
 
 
 async def start_background_tasks(app):
-    app["ready_file_writer"] = asyncio.create_task(fake_matlab_started(app))
+    await fake_matlab_started(app)
 
 
 async def cleanup_background_tasks(app):
-    app["ready_file_writer"].cancel()
-    await app["ready_file_writer"]
+    # Delete ready file on tear down
+    # NOTE MATLAB does not delete this file on shutdown.
+    matlab_ready_file, matlab_log_dir = mwi_connector.get_matlab_ready_file(app["port"])
+    matlab_ready_file.unlink()
 
 
 def matlab(args):
@@ -93,9 +111,25 @@ def matlab(args):
     wait_for_port(port)
     print(f"Serving fake MATLAB Embedded Connector at port {port}")
     app = web.Application()
-    app["ready_file"] = args.ready_file
     app["ready_delay"] = args.ready_delay
+    app["port"] = port
+
     app.router.add_route("GET", "/index-jsd-cr.html", web_handler)
+
+    app.router.add_route("GET", "/http_get_request.html", get_request_handler)
+
+    app.router.add_route(
+        "POST",
+        "/http_post_request.html/{variable}/messageservice/json/secure",
+        post_request_handler,
+    )
+
+    app.router.add_route("PUT", "/http_put_request.html", put_request_handler)
+
+    app.router.add_route("DELETE", "/http_delete_request.html", delete_request_handler)
+
+    app.router.add_route("GET", "/http_ws_request.html/", web_socket_handler)
+
     app.on_startup.append(start_background_tasks)
     app.on_cleanup.append(cleanup_background_tasks)
     web.run_app(app, port=port)
@@ -103,21 +137,16 @@ def matlab(args):
 
 if __name__ == "__main__":
     import argparse
-    import tempfile
     from pathlib import Path
 
     parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="cmd", required=True)
-    xvfb_parser = subparsers.add_parser("xvfb")
-    xvfb_parser.add_argument("--ready-file", type=Path)
-    xvfb_parser.set_defaults(func=xvfb)
-    matlab_parser = subparsers.add_parser("matlab")
-    matlab_parser.add_argument(
-        "--ready-file",
-        default=Path(tempfile.gettempdir()) / "connector.securePort",
-        type=Path,
+    subparsers = (
+        parser.add_subparsers(dest="cmd", required=True)
+        if sys.version_info[:2] >= (3, 7)
+        else parser.add_subparsers(dest="cmd")
     )
-    matlab_parser.add_argument("--ready-delay", default=10, type=int)
+    matlab_parser = subparsers.add_parser("matlab")
+    matlab_parser.add_argument("--ready-delay", default=2, type=int)
     matlab_parser.set_defaults(func=matlab)
     args = parser.parse_args()
     args.func(args)
