@@ -30,7 +30,7 @@ def setup_matlab():
         "environment": _get_env,
         "absolute_url": True,
         "launcher_entry": {
-            "title": "_MATLAB",
+            "title": "dev_MATLAB",
             "icon_path": os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "icons", "matlab.svg"
             ),
