@@ -1,3 +1,12 @@
+NeSI install
+
+```
+module load nodejs JupyterLab/.2021.9.0-gimkl-2020a-3.1.9
+pip install --user git+https://github.com/nesi/jupyter-matlab-proxy
+```
+
+
+
 # MATLAB Integration for Jupyter
 [![GitHub Workflow Status](https://img.shields.io/github/workflow/status/mathworks/jupyter-matlab-proxy/MATLAB%20Jupyter%20Integration?logo=github)](https://github.com/mathworks/jupyter-matlab-proxy/actions)
 [![PyPI badge](https://img.shields.io/pypi/v/jupyter-matlab-proxy.svg?logo=pypi)](https://pypi.python.org/pypi/jupyter-matlab-proxy)
