@@ -11,6 +11,7 @@ import sys
 import logging
 from datetime import datetime, timezone, timedelta
 import socket
+import errno
 from collections import deque
 from .util import mw, mwi_logger
 from .util.mwi_exceptions import (
