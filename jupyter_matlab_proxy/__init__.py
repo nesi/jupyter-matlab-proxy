@@ -30,7 +30,7 @@ def setup_matlab():
         "environment": _get_env,
         "absolute_url": True,
         "launcher_entry": {
-            "title": "dev_MATLAB",
+            "title": "MATLAB 2020b",
             "icon_path": os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "icons", "matlab.svg"
             ),
