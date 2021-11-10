@@ -2,7 +2,7 @@
 
 import os
 from jupyter_matlab_proxy import mwi_environment_variables as mwi_env
-
+import subprocess
 
 def _get_env(port, base_url):
     
@@ -22,7 +22,6 @@ def _get_env(port, base_url):
         mwi_env.get_env_name_mhlm_context(): "MATLAB_JUPYTER",
     }
 
-
 def setup_matlab():
     return {
         "command": [os.path.join(os.path.dirname(os.path.abspath(__file__)), "nesi_wrapper.sh")],
@@ -34,5 +33,7 @@ def setup_matlab():
             "icon_path": os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "icons", "matlab.svg"
             ),
+            "enabled": subprocess.check_call([f"export TEST_SITE=TRUE ; {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nesi_wrapper.sh')}"],shell=True, timeout=5, stdout=subprocess.DEVNULL).returncode,
+            # Check if valid licexit
         },
     }
