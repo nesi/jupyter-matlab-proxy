@@ -2,7 +2,7 @@ NeSI install
 
 ```
 module load nodejs JupyterLab/.2021.9.0-gimkl-2020a-3.1.9
-pip install --user git+https://github.com/nesi/jupyter-matlab-proxy
+pip install --user git+https://github.com/nesi/jupyter-matlab-proxy@dev_nesi
 ```
 
 
