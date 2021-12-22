@@ -4,6 +4,8 @@ import os
 from jupyter_matlab_proxy import mwi_environment_variables as mwi_env
 import subprocess
 
+matlab_module_version = "2021a"
+
 def _get_env(port, base_url):
     
     # matlab_root = "/opt/nesi/share/MATLAB/"
@@ -20,6 +22,7 @@ def _get_env(port, base_url):
         mwi_env.get_env_name_base_url(): f"{base_url}matlab",
         mwi_env.get_env_name_app_host(): "127.0.0.1",
         mwi_env.get_env_name_mhlm_context(): "MATLAB_JUPYTER",
+        "MLM_MOD_VER": matlab_module_version
     }
 
 def setup_matlab():
@@ -29,11 +32,10 @@ def setup_matlab():
         "environment": _get_env,
         "absolute_url": True,
         "launcher_entry": {
-            "title": "MATLAB 2020b",
+            "title": f"MATLAB {matlab_module_version}",
             "icon_path": os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "icons", "matlab.svg"
             ),
-            "enabled": subprocess.check_call([f"export TEST_SITE=TRUE ; {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nesi_wrapper.sh')}"],shell=True, timeout=5, stdout=subprocess.DEVNULL).returncode,
-            # Check if valid licexit
+            "enabled": subprocess.run([f"export DISALLOW_REMOTE_LIC=TRUE;export MLM_MOD_VER={matlab_module_version} {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lic_test.sh')}"],shell=True, timeout=15, stdout=subprocess.DEVNULL).returncode,
         },
     }
