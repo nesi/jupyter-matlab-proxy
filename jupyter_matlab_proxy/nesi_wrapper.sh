@@ -6,4 +6,4 @@ echo "APP_PORT: $APP_PORT"
 
 module load MATLAB/$MLM_MOD_VER
 
-matlab-jupyter-app
+matlab-proxy-app
