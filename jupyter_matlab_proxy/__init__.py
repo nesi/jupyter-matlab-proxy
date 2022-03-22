@@ -25,7 +25,7 @@ def _get_env(port, base_url):
         mwi_env.get_env_name_app_port(): str(port),
         mwi_env.get_env_name_base_url(): f"{base_url}matlab",
         mwi_env.get_env_name_app_host(): "127.0.0.1",
-        "MLM_MOD_VER": "2020a",
+        "MLM_MOD_VER": "2020b",
     }
 
 
